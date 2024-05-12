@@ -25,6 +25,8 @@ services:
       - broker
       - schema-registry
       - control-center
+    environment:
+      - POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Username=postgres;Password=secret;Database=loans
     ports:
       - "9050:8050"
     networks:

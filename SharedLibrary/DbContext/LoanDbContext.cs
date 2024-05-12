@@ -16,7 +16,6 @@ public class LoanDbContext(IConfiguration configuration) : Microsoft.EntityFrame
         // Neglect documents inside LoanApplication entity
         // Documents will be saved in a separate DB
         modelBuilder.Entity<LoanApplication>()
-            .Ignore(x => x.Documents)
             .HasKey(x => x.Id);
         
     }

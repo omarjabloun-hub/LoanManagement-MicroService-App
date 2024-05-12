@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Newtonsoft.Json;
 using SharedLibrary;
 using SharedLibrary.Kafka;
 
@@ -37,17 +38,18 @@ public class LoanManagementController : ControllerBase
 
         var documentsArray = await Task.WhenAll(documentTasks);
 
-        var loanApplication = new LoanApplication(
+        var loanApplication = new LoanApplicationFullDto(
             Guid.NewGuid(),
             loanApplicationDto.Income,
             loanApplicationDto.FullName,
             loanApplicationDto.HasDebt,
-            documentsArray
+            documentsArray.ToList()
         );
-
+        var serializedLoanApplication = System.Text.Json.JsonSerializer.Serialize(loanApplication);
+        Console.WriteLine($"Sending : {serializedLoanApplication}");
         try
         {
-            await _kafkaProducer.ProduceAsync( loanApplication.ToString());
+            await _kafkaProducer.ProduceAsync(serializedLoanApplication);
             Console.WriteLine("Loan application sent to Loan application Queue");
         }
         catch (Exception ex)

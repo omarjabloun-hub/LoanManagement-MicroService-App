@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Confluent.Kafka;
 using SharedLibrary;
+using SharedLibrary.DbContext;
 using SharedLibrary.Kafka;
 
 namespace CommercialServices;
@@ -11,15 +12,17 @@ public class CommercialKafkaConsumer : IKafkaConsumer
     
     private readonly string _topic;
     private readonly IConfiguration _configuration;
+    private readonly LoanDbContext _context;
 
-    public CommercialKafkaConsumer(string topic, string groupId, IConfiguration configuration)
+    public CommercialKafkaConsumer(IConfiguration configuration, LoanDbContext context)
     {
-        _topic = topic;
+        _topic = "LoanApplicationQueue";
         _configuration = configuration;
+        _context = context;
         var consumerConfig = new ConsumerConfig
         {
             BootstrapServers = configuration["Kafka:BootstrapServers"],
-            GroupId = groupId,
+            GroupId = "CommercialService",
             AutoOffsetReset = AutoOffsetReset.Earliest
         };
 
@@ -50,46 +53,62 @@ public class CommercialKafkaConsumer : IKafkaConsumer
             var message = consumeResult.Message.Value;
             
             Console.WriteLine($"message received: {message}");
-            var documents = JsonSerializer.Deserialize<List<Document>>(message);
-            if(documents == null)
-            {
-                Console.WriteLine("Error deserializing documents");
-            }
-            else
-            {
+
+            try{
+                var loanApplication = System.Text.Json.JsonSerializer.Deserialize<LoanApplicationFullDto>(message);
                 Console.WriteLine("Sending Documents to OCR Service ...");
                 var ocrProducer = new KafkaProducer("OcrQueue", _configuration);
-                ocrProducer.ProduceAsync(documents.ToString());
+                var serializedDocuments = JsonSerializer.Serialize(loanApplication.Documents);
+                ocrProducer.ProduceAsync(serializedDocuments);
                 Console.WriteLine("Documents sent to OCR service for processing.");
+                try
+                {
+                    Console.WriteLine("Saving documents to Document database ...");
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine(e);
+                }
+            }catch(Exception ex){
+                Console.WriteLine("Error deserializing documents  {0}", ex);
             }
-            var loanApplication = JsonSerializer.Deserialize<LoanApplicationDto>(message);
-            if(loanApplication == null)
+
+            try
             {
-                Console.WriteLine("Error deserializing loan application");
-            }
-            else
-            {
-                Console.WriteLine("Save loan application to Loan database ...");
+                var loanApplication = JsonSerializer.Deserialize<LoanApplicationFullDto>(message);
+                var loanToDb = new LoanApplication(loanApplication.Id, loanApplication.Income, loanApplication.FullName, loanApplication.HasDebt);
                 // Save loan application to Loan database
+                try
+                {
+                    Console.WriteLine("Saving loan application to Loan database ...");
+                    _context.Set<LoanApplication>().Add(loanToDb);
+                }catch(Exception ex){
+                    Console.WriteLine("Error saving loan application to Loan database  {0}", ex);
+                }
                 Console.WriteLine("Loan application saved to Loan database.");
                 Console.WriteLine("Checking if loan application is initially eligible...");
                 if(loanApplication.Income > 100000)
                 {
                     Console.WriteLine("Loan application is initially eligible.");
-                    var EligibilityProducer = new KafkaProducer("EligibilityQueue", _configuration);
-                    EligibilityProducer.ProduceAsync(loanApplication.ToString());
+                    var eligibilityProducer = new KafkaProducer("EligibilityQueue", _configuration);
+                    var serializedLoanApplication = JsonSerializer.Serialize(loanApplication);
+                    eligibilityProducer.ProduceAsync(serializedLoanApplication);
+                    Console.WriteLine("Loan application sent to Risk Management service for further processing.");
                 }
                 else
                 {
                     Console.WriteLine("Loan application is not initially eligible.");
-                    var NotificationProducer = new KafkaProducer("NotificationQueue", _configuration);
-                    NotificationProducer.ProduceAsync("Loan application is not initially eligible.");
+                    var notificationProducer = new KafkaProducer("NotificationQueue", _configuration);
+                    notificationProducer.ProduceAsync("Loan application is not initially eligible.");
+                    Console.WriteLine("Client Notified of loan application status(Not Eligible).");
                 }
+            }catch(Exception ex){
+                Console.WriteLine("Error deserializing loan application  {0}", ex);
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Error processing Kafka message");
+            Console.WriteLine("Error processing Kafka message {0}", ex);
         }
     }
 }
