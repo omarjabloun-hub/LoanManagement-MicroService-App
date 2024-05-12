@@ -1,5 +1,5 @@
 # MicroService Loan Management App
-A demo application for a loan management app 
+An academic loan management app project
 ## Start the project 
 Start the docker containers
 ```sh
